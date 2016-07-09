@@ -1,30 +1,10 @@
 #!/usr/bin/env python3
 '''
-passthroughfs.py - Example file system for Python-LLFUSE
+debjs.py - Replace well known web assets with symlinks to debian packaged versions
 
-This file system mirrors the contents of a specified directory tree. It requires
-Python 3.3 (since Python 2.x does not support the follow_symlinks parameters for
-os.* functions).
+Based on https://github.com/python-llfuse/python-llfuse/blob/master/examples/passthroughfs.py
 
-Caveats:
-
- * Inode generation numbers are not passed through but set to zero.
-
- * Block size (st_blksize) and number of allocated blocks (st_blocks) are not
-   passed through.
-
- * Performance for large directories is not good, because the directory
-   is always read completely.
-
- * There may be a way to break-out of the directory tree.
-
- * The readdir implementation is not fully POSIX compliant. If a directory
-   contains hardlinks and is modified during a readdir call, readdir()
-   may return some of the hardlinked files twice or omit them completely.
-
- * If you delete or rename files in the underlying file system, the
-   passthrough file system will get confused.
-
+Copyright ©  Enrico Zini <enrico@debian.org>
 Copyright ©  Nikolaus Rath <Nikolaus.org>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
@@ -43,14 +23,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import os
 import sys
-
-# We are running from the Python-LLFUSE source directory, put it
-# into the Python path.
-basedir = os.path.abspath(os.path.join(os.path.dirname(sys.argv[0]), '..'))
-if (os.path.exists(os.path.join(basedir, 'setup.py')) and
-    os.path.exists(os.path.join(basedir, 'src', 'llfuse'))):
-    sys.path.append(os.path.join(basedir, 'src'))
-
 import llfuse
 from argparse import ArgumentParser
 import errno
@@ -66,8 +38,13 @@ faulthandler.enable()
 log = logging.getLogger(__name__)
 
 class Operations(llfuse.Operations):
-
-    def __init__(self, source):
+    def __init__(self, source, redirects={}):
+        """
+        redirects is a dict mapping basenames to symlink targets. For example:
+        {
+            "jquery.min.js": "/usr/share/javascript/jquery/jquery.min.js"
+        }
+        """
         super().__init__()
         self._inode_path_map = { llfuse.ROOT_INODE: source }
         self._lookup_cnt = defaultdict(lambda : 0)
