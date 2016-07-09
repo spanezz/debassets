@@ -46,6 +46,7 @@ class Operations(llfuse.Operations):
         }
         """
         super().__init__()
+        self.redirects = redirects
         self._inode_path_map = { llfuse.ROOT_INODE: source }
         self._lookup_cnt = defaultdict(lambda : 0)
         self._fd_inode_map = dict()
@@ -117,6 +118,28 @@ class Operations(llfuse.Operations):
         except OSError as exc:
             raise FUSEError(exc.errno)
 
+        if path is not None:
+            basename = os.path.basename(path)
+            override = self.redirects.get(basename, None)
+            log.debug("BASENAME %s OVERRIDE %s", basename, override)
+            if override is not None:
+                log.debug("Override %s with a symlink to %s", basename, override)
+                entry = llfuse.EntryAttributes()
+                for attr in ('st_ino', 'st_nlink', 'st_uid', 'st_gid',
+                            'st_rdev', 'st_atime_ns', 'st_mtime_ns',
+                            'st_ctime_ns'):
+                    setattr(entry, attr, getattr(stat, attr))
+                entry.st_size = len(override)
+                entry.st_mode = (stat.st_mode & ~0o170000) | 0o120000
+                entry.generation = 0
+                entry.entry_timeout = 5
+                entry.attr_timeout = 5
+                entry.st_blksize = 512
+                entry.st_blocks = ((entry.st_size+entry.st_blksize-1) // entry.st_blksize)
+                return entry
+        else:
+            log.debug("DEBJS getattr called on fd")
+
         entry = llfuse.EntryAttributes()
         for attr in ('st_ino', 'st_mode', 'st_nlink', 'st_uid', 'st_gid',
                      'st_rdev', 'st_size', 'st_atime_ns', 'st_mtime_ns',
@@ -132,11 +155,16 @@ class Operations(llfuse.Operations):
 
     def readlink(self, inode, ctx):
         path = self._inode_to_path(inode)
-        try:
-            target = os.readlink(path)
-        except OSError as exc:
-            raise FUSEError(exc.errno)
-        return fsencode(target)
+        basename = os.path.basename(path)
+        override = self.redirects.get(basename, None)
+        if override is not None:
+            return override
+        else:
+            try:
+                target = os.readlink(path)
+            except OSError as exc:
+                raise FUSEError(exc.errno)
+            return fsencode(target)
 
     def opendir(self, inode, ctx):
         return inode
@@ -401,7 +429,9 @@ def parse_args(args):
 def main():
     options = parse_args(sys.argv[1:])
     init_logging(options.debug)
-    operations = Operations(options.source)
+    operations = Operations(options.source, {
+        "jquery.min.js": b"/usr/share/javascript/jquery/jquery.min.js"
+    })
 
     log.debug('Mounting...')
     fuse_options = set(llfuse.default_options)
